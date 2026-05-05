@@ -6,7 +6,7 @@ module.exports = async function handler(req, res) {
         return res.status(405).json({ message: 'Method not allowed' });
     }
 
-    const token = process.env.GITHUB_TOKEN;
+    const token = process.env.GITHUB_TOKEN?.trim();
     if (!token) {
         return res.status(500).json({
             message: 'Missing GITHUB_TOKEN environment variable on the server.',
@@ -45,11 +45,27 @@ module.exports = async function handler(req, res) {
         }
 
         const text = await githubResponse.text();
+        const contentType = githubResponse.headers.get('content-type') || 'application/json';
+
+        if (githubResponse.status === 401) {
+            let githubMessage = 'Unauthorized';
+            try {
+                githubMessage = JSON.parse(text).message || githubMessage;
+            } catch {
+                if (text) githubMessage = text;
+            }
+
+            return res.status(401).json({
+                message: 'GitHub rejected the server token. Create a new GitHub token, update GITHUB_TOKEN in Vercel, and redeploy.',
+                githubMessage,
+            });
+        }
+
         res.status(githubResponse.status);
 
         if (!text) return res.end();
 
-        res.setHeader('Content-Type', githubResponse.headers.get('content-type') || 'application/json');
+        res.setHeader('Content-Type', contentType);
         return res.send(text);
     } catch (error) {
         return res.status(502).json({
