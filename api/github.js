@@ -13,9 +13,12 @@ module.exports = async function handler(req, res) {
         });
     }
 
-    const path = Array.isArray(req.query.path) ? req.query.path.join('/') : req.query.path;
-    const query = new URLSearchParams();
+    const githubPath = Array.isArray(req.query.path) ? req.query.path[0] : req.query.path;
+    if (!githubPath || !githubPath.startsWith('/')) {
+        return res.status(400).json({ message: 'Missing GitHub API path.' });
+    }
 
+    const query = new URLSearchParams();
     for (const [key, value] of Object.entries(req.query)) {
         if (key === 'path') continue;
         const values = Array.isArray(value) ? value : [value];
@@ -24,7 +27,7 @@ module.exports = async function handler(req, res) {
         }
     }
 
-    const githubUrl = `${GITHUB_API_BASE_URL}/${path || ''}${query.size ? `?${query}` : ''}`;
+    const githubUrl = `${GITHUB_API_BASE_URL}${githubPath}${query.size ? `?${query}` : ''}`;
 
     try {
         const githubResponse = await fetch(githubUrl, {
