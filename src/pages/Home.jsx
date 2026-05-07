@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Copy, EyeOff } from 'lucide-react';
 import { ToastContainer, toast } from 'react-toastify';
-import { clearStoredUsers, loadStoredSearch, saveStoredUsers } from '../utils/browserStorage';
+import { clearStoredUsers, loadStoredSearch, loadStoredUsers, saveStoredUsers } from '../utils/browserStorage';
 
 const hasEmail = (user) => Boolean(user?.email?.trim());
 
@@ -15,12 +15,12 @@ export default function Home() {
 
     useEffect(() => {
         const storedSearch = loadStoredSearch();
-        setUsers(storedSearch.users.filter(hasEmail));
+        setUsers(loadStoredUsers().filter(hasEmail));
         setSearchParams(storedSearch.params);
 
         const handleStorage = () => {
             const nextStoredSearch = loadStoredSearch();
-            setUsers(nextStoredSearch.users.filter(hasEmail));
+            setUsers(loadStoredUsers().filter(hasEmail));
             setSearchParams(nextStoredSearch.params);
             setSelectedIds(new Set());
             setSelectAll(false);
@@ -92,7 +92,6 @@ export default function Home() {
         }
 
         setUsers([]);
-        setSearchParams(null);
         setSelectedIds(new Set());
         setSelectAll(false);
         toast.success('Stored users cleared');

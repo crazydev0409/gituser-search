@@ -4,7 +4,7 @@ import { toast, ToastContainer } from 'react-toastify';
 import dayjs from 'dayjs';
 import { Copy } from 'lucide-react';
 import { ThrottledQueue } from '../utils/requestQueue';
-import { loadStoredSearch, saveStoredSearch, saveStoredUsers } from '../utils/browserStorage';
+import { loadStoredSearch, mergeStoredUsers, saveStoredSearch } from '../utils/browserStorage';
 
 const isNoreply = (email) => {
     if (!email) return true;
@@ -54,8 +54,11 @@ export default function Search() {
     const updateStoredUsers = (updater) => {
         setUsers((prev) => {
             const next = typeof updater === 'function' ? updater(prev) : updater;
-            if (!saveStoredUsers(next)) {
-                toast.error('Failed saving users to browser storage.');
+            if (!saveStoredSearch({
+                params: getSearchParams('running'),
+                users: next,
+            })) {
+                toast.error('Failed saving search results to browser storage.');
             }
             return next;
         });
@@ -381,11 +384,15 @@ export default function Search() {
 
         await Promise.allSettled(tasks);
         const finalizedStatus = stopRequested.current ? 'stopped' : 'completed';
+        const finalizedParams = getSearchParams(finalizedStatus);
         if (!saveStoredSearch({
-            params: getSearchParams(finalizedStatus),
+            params: finalizedParams,
             users: finalizedUsers,
         })) {
             toast.error('Failed saving finalized search to browser storage.');
+        }
+        if (!mergeStoredUsers(finalizedUsers)) {
+            toast.error('Failed merging new users into browser storage.');
         }
         setLoading(false);
 
