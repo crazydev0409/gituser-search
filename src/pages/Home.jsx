@@ -4,7 +4,7 @@ import { Copy, EyeOff } from 'lucide-react';
 import { ToastContainer, toast } from 'react-toastify';
 import { clearStoredUsers, loadStoredSearch, loadStoredUsers, saveStoredUsers } from '../utils/browserStorage';
 
-const hasEmail = (user) => Boolean(user?.email?.trim());
+const hasDiscord = (user) => Boolean(user?.discord?.trim());
 
 export default function Home() {
     const [users, setUsers] = useState([]);
@@ -15,12 +15,12 @@ export default function Home() {
 
     useEffect(() => {
         const storedSearch = loadStoredSearch();
-        setUsers(loadStoredUsers().filter(hasEmail));
+        setUsers(loadStoredUsers().filter(hasDiscord));
         setSearchParams(storedSearch.params);
 
         const handleStorage = () => {
             const nextStoredSearch = loadStoredSearch();
-            setUsers(loadStoredUsers().filter(hasEmail));
+            setUsers(loadStoredUsers().filter(hasDiscord));
             setSearchParams(nextStoredSearch.params);
             setSelectedIds(new Set());
             setSelectAll(false);
@@ -46,9 +46,9 @@ export default function Home() {
         toast.success('User removed');
     };
 
-    const copyEmail = (email) => {
-        navigator.clipboard.writeText(email);
-        toast.success('Email copied!');
+    const copyDiscord = (discord) => {
+        navigator.clipboard.writeText(discord);
+        toast.success('Discord copied!');
     };
 
     const toggleSelect = (id) => {
@@ -98,11 +98,11 @@ export default function Home() {
     };
 
     const filteredUsers = users.filter((user) => {
-        if (!hasEmail(user)) return false;
+        if (!hasDiscord(user)) return false;
         if (!searchQuery) return true;
         const q = searchQuery.toLowerCase();
         return (
-            user.email?.toLowerCase().includes(q) ||
+            user.discord?.toLowerCase().includes(q) ||
             user.name?.toLowerCase().includes(q) ||
             user.login?.toLowerCase().includes(q)
         );
@@ -143,7 +143,7 @@ export default function Home() {
                         <input
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Search by name or email..."
+                            placeholder="Search by name or Discord..."
                             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500"
                         />
                     </div>
@@ -230,13 +230,13 @@ export default function Home() {
                                     <div className="space-y-1 mb-3">
                                         <div className="flex items-center gap-1">
                                             <p className="text-xs text-gray-700 truncate flex-1">
-                                                {user.email || 'No email'}
+                                                {user.discord || 'No Discord account'}
                                             </p>
-                                            {user.email && (
+                                            {user.discord && (
                                                 <button
-                                                    onClick={() => copyEmail(user.email)}
+                                                    onClick={() => copyDiscord(user.discord)}
                                                     className="text-gray-400 hover:text-indigo-600 transition-colors flex-shrink-0"
-                                                    title="Copy email"
+                                                    title="Copy Discord"
                                                 >
                                                     <Copy size={13} />
                                                 </button>

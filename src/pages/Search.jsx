@@ -6,13 +6,29 @@ import { Copy } from 'lucide-react';
 import { ThrottledQueue } from '../utils/requestQueue';
 import { loadStoredSearch, mergeStoredUsers, saveStoredSearch } from '../utils/browserStorage';
 
-const isNoreply = (email) => {
-    if (!email) return true;
-    const e = email.toLowerCase();
-    return e.includes('noreply') || e.includes('@users.noreply.github.com');
+const DISCORD_PATTERNS = [
+    /\bdiscord(?:\s*(?::|=|-|is|@|handle|user(?:name)?))\s*(@?[a-z0-9_.]{2,32}#\d{4}|@?[a-z0-9_.]{2,32})\b/i,
+    /\b([a-z0-9_.]{2,32}#\d{4})\b/i,
+    /\b((?:https?:\/\/)?(?:www\.)?discord(?:app)?\.com\/users\/\d{17,20})\b/i,
+    /\b((?:https?:\/\/)?(?:www\.)?discord(?:app)?\.com\/invite\/[a-z0-9-]+)\b/i,
+    /\b((?:https?:\/\/)?(?:www\.)?discord\.gg\/[a-z0-9-]+)\b/i,
+    /\b((?:https?:\/\/)?(?:www\.)?(?:dsc\.gg|discord\.me|discord\.io)\/[a-z0-9-]+)\b/i,
+];
+
+const extractDiscordAccount = (profile) => {
+    const fields = [profile?.bio, profile?.blog, profile?.company].filter(Boolean);
+
+    for (const field of fields) {
+        for (const pattern of DISCORD_PATTERNS) {
+            const match = String(field).match(pattern);
+            if (match?.[1]) return match[1].trim().replace(/[),.;]+$/, '');
+        }
+    }
+
+    return '';
 };
 
-const hasEmail = (user) => Boolean(user?.email?.trim());
+const hasDiscord = (user) => Boolean(user?.discord?.trim());
 
 const REQUEST_TIMEOUT_MS = 30000;
 const secondaryLookupOptions = { stopOnRateLimit: false };
@@ -39,7 +55,7 @@ export default function Search() {
 
     useEffect(() => {
         const storedSearch = loadStoredSearch();
-        setUsers(storedSearch.users.filter(hasEmail));
+        setUsers(storedSearch.users.filter(hasDiscord));
 
         if (storedSearch.params) {
             setLocation(storedSearch.params.location || 'Australia');
@@ -92,94 +108,16 @@ export default function Search() {
         }
     }
 
-    async function searchUserCommitsGlobal(username) {
-        try {
-            const res = await safeAxiosGet('/search/commits', {
-                params: { q: `author:${username}`, per_page: 30 },
-                headers: { Accept: 'application/vnd.github.cloak-preview' },
-            }, 1, secondaryLookupOptions);
-
-            const emails = new Set();
-            for (const item of res.data.items || []) {
-                const email = item.commit?.author?.email;
-                if (email && !isNoreply(email)) emails.add(email);
-            }
-            return Array.from(emails);
-        } catch {
-            return [];
-        }
-    }
-
-    async function getUserRepos(username) {
-        const repos = [];
-        let page = 1;
-        while (true) {
-            const { data } = await safeAxiosGet(`/users/${username}/repos`, {
-                params: { per_page: 100, page },
-            }, 1, secondaryLookupOptions);
-            if (!data?.length) break;
-            repos.push(...data);
-            if (data.length < 100 || page > 5) break;
-            page++;
-        }
-        return repos;
-    }
-
-    async function getRepoCommits(owner, repo, author, maxPages = 2) {
-        const emails = new Set();
-        for (let page = 1; page <= maxPages; page++) {
-            const { data } = await safeAxiosGet(`/repos/${owner}/${repo}/commits`, {
-                params: { author, per_page: 100, page },
-            }, 1, secondaryLookupOptions);
-            if (!data?.length) break;
-            for (const c of data) {
-                const gitEmail = c.commit?.author?.email;
-                if (gitEmail && !isNoreply(gitEmail)) emails.add(gitEmail);
-            }
-        }
-        return Array.from(emails);
-    }
-
-    async function collectEmailsFromUser(username, knownProfileEmail) {
-        if (knownProfileEmail && !isNoreply(knownProfileEmail)) {
-            return knownProfileEmail;
-        }
-
-        if (knownProfileEmail === undefined) {
-            const profile = await safeAxiosGet(`/users/${username}`, {}, 1, secondaryLookupOptions);
-            if (profile.data?.email && !isNoreply(profile.data.email)) {
-                return profile.data.email;
-            }
-        }
-
-        const global = await searchUserCommitsGlobal(username);
-        if (global.length) return global[0];
-
-        try {
-            const repos = await getUserRepos(username);
-            const repoEmailResults = await Promise.allSettled(
-                repos.slice(0, 3).map((r) => getRepoCommits(r.owner.login, r.name, username, 1))
-            );
-            const repoEmails = repoEmailResults
-                .filter((result) => result.status === 'fulfilled')
-                .flatMap((result) => result.value);
-            if (repoEmails.length) return repoEmails[0];
-        } catch {
-            return null;
-        }
-        return null;
-    }
-
     async function hydrateUsersWithProfiles(searchUsers) {
         const detailQueue = new ThrottledQueue({ concurrency: 1, intervalMs: 2500 });
         const profileResults = await Promise.allSettled(
             searchUsers.map((user) => detailQueue.enqueue(async () => {
                 const { data } = await safeAxiosGet(`/users/${user.login}`, {}, 1, secondaryLookupOptions);
-                const email = await collectEmailsFromUser(user.login, data?.email);
+                const discord = extractDiscordAccount(data);
                 return {
                     ...user,
                     name: data?.name || user.login,
-                    email: email || '',
+                    discord,
                     location: data?.location || user.location || '',
                     company: data?.company || '',
                     bio: data?.bio || '',
@@ -195,30 +133,32 @@ export default function Search() {
             return {
                 ...searchUsers[index],
                 name: searchUsers[index]?.login || '',
-                email: '',
+                discord: '',
                 location: searchUsers[index]?.location || '',
             };
         });
     }
 
-    const findEmail = async (user) => {
+    const findDiscord = async (user) => {
         try {
             const profileRes = await safeAxiosGet(`/users/${user.login}`, {}, 1, secondaryLookupOptions);
-            const email = profileRes.data?.email || (await collectEmailsFromUser(user.login));
+            const discord = extractDiscordAccount(profileRes.data);
 
-            if (email) {
+            if (discord) {
                 updateStoredUsers((prev) => prev.map((item) => item.id === user.id ? {
                     ...item,
                     name: profileRes.data?.name || user.login,
-                    email,
+                    discord,
                     location: profileRes.data?.location || '',
+                    company: profileRes.data?.company || '',
+                    bio: profileRes.data?.bio || '',
                 } : item));
-                toast.success('Email found!');
+                toast.success('Discord account found!');
             } else {
-                toast.warning('No email found for this user');
+                toast.warning('No Discord account found for this user');
             }
         } catch {
-            toast.error('Email lookup failed');
+            toast.error('Discord lookup failed');
         }
     };
 
@@ -227,12 +167,12 @@ export default function Search() {
         toast.success('User removed');
     };
 
-    const copyEmail = async (email) => {
+    const copyDiscord = async (discord) => {
         try {
-            await navigator.clipboard.writeText(email);
-            toast.success('Email copied!');
+            await navigator.clipboard.writeText(discord);
+            toast.success('Discord copied!');
         } catch {
-            toast.error('Failed to copy email');
+            toast.error('Failed to copy Discord');
         }
     };
 
@@ -241,7 +181,7 @@ export default function Search() {
             id: user.login,
             login: user.login ?? '',
             name: user.name || user.login || '',
-            email: user.email || '',
+            discord: user.discord || '',
             avatar_url: user.avatar_url,
             html_url: user.html_url,
             location: user.location ?? '',
@@ -356,7 +296,7 @@ export default function Search() {
 
                 if (newItems.length > 0) {
                     const hydratedUsers = await hydrateUsersWithProfiles(newItems);
-                    const localUsers = makeLocalFetchedUsers(hydratedUsers).filter(hasEmail);
+                    const localUsers = makeLocalFetchedUsers(hydratedUsers).filter(hasDiscord);
                     if (!localUsers.length) return;
 
                     newUsersDisplayed += localUsers.length;
@@ -536,13 +476,13 @@ export default function Search() {
                                 <div className="text-xs text-gray-500 truncate">@{user.login}</div>
                                 <div className="text-xs text-gray-500 truncate">{user.location || 'Unknown'}</div>
                                 <div className="flex items-center gap-1">
-                                    <div className="text-xs text-gray-700 truncate">{user.email || 'No public email'}</div>
-                                    {user.email && (
+                                    <div className="text-xs text-gray-700 truncate">{user.discord || 'No Discord account'}</div>
+                                    {user.discord && (
                                         <button
                                             type="button"
-                                            onClick={() => copyEmail(user.email)}
+                                            onClick={() => copyDiscord(user.discord)}
                                             className="text-gray-400 hover:text-indigo-600 transition-colors flex-shrink-0"
-                                            title="Copy email"
+                                            title="Copy Discord"
                                         >
                                             <Copy size={12} />
                                         </button>
@@ -552,10 +492,10 @@ export default function Search() {
                         </div>
                         <div className="flex gap-1.5">
                             <button
-                                onClick={() => findEmail(user)}
+                                onClick={() => findDiscord(user)}
                                 className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-1 rounded text-xs font-medium transition-colors"
                             >
-                                Find Email
+                                Find Discord
                             </button>
                             <button
                                 onClick={() => hideUser(user)}
