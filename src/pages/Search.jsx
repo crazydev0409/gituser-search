@@ -23,7 +23,18 @@ const TELEGRAM_PATTERNS = [
     /\b((?:https?:\/\/)?(?:www\.)?telegram\.dog\/[a-z0-9_]{5,32})\b/i,
 ];
 
+const PHONE_PATTERNS = [
+    /\b(?:phone|mobile|cell|tel|telephone|whatsapp|wa)(?:\s*(?::|=|-|is))\s*((?:\+|00)?\d[\d\s().-]{6,}\d)\b/i,
+    /\b((?:\+|00)\d[\d\s().-]{6,}\d)\b/,
+];
+
 const cleanContact = (contact) => contact.trim().replace(/[),.;]+$/, '');
+const cleanPhoneNumber = (phone) => cleanContact(phone).replace(/\s+/g, ' ');
+
+const isLikelyPhoneNumber = (phone) => {
+    const digits = phone.replace(/\D/g, '');
+    return digits.length >= 7 && digits.length <= 15;
+};
 
 const extractContact = (profile, patterns) => {
     const fields = [profile?.bio, profile?.blog, profile?.company].filter(Boolean);
@@ -38,12 +49,29 @@ const extractContact = (profile, patterns) => {
     return '';
 };
 
+const extractPhoneNumber = (profile) => {
+    const fields = [profile?.bio, profile?.blog, profile?.company].filter(Boolean);
+
+    for (const field of fields) {
+        for (const pattern of PHONE_PATTERNS) {
+            const match = String(field).match(pattern);
+            if (match?.[1]) {
+                const phone = cleanPhoneNumber(match[1]);
+                if (isLikelyPhoneNumber(phone)) return phone;
+            }
+        }
+    }
+
+    return '';
+};
+
 const extractCommunicationContacts = (profile) => ({
     discord: extractContact(profile, DISCORD_PATTERNS),
     telegram: extractContact(profile, TELEGRAM_PATTERNS),
+    phone: extractPhoneNumber(profile),
 });
 
-const hasContact = (user) => Boolean(user?.discord?.trim() || user?.telegram?.trim());
+const hasContact = (user) => Boolean(user?.discord?.trim() || user?.telegram?.trim() || user?.phone?.trim());
 
 const REQUEST_TIMEOUT_MS = 30000;
 const secondaryLookupOptions = { stopOnRateLimit: false };
@@ -150,6 +178,7 @@ export default function Search() {
                 name: searchUsers[index]?.login || '',
                 discord: '',
                 telegram: '',
+                phone: '',
                 location: searchUsers[index]?.location || '',
             };
         });
@@ -171,7 +200,7 @@ export default function Search() {
                 } : item));
                 toast.success('Communication contact found!');
             } else {
-                toast.warning('No Discord or Telegram contact found for this user');
+                toast.warning('No Discord, Telegram, or phone contact found for this user');
             }
         } catch {
             toast.error('Contact lookup failed');
@@ -199,6 +228,7 @@ export default function Search() {
             name: user.name || user.login || '',
             discord: user.discord || '',
             telegram: user.telegram || '',
+            phone: user.phone || '',
             avatar_url: user.avatar_url,
             html_url: user.html_url,
             location: user.location ?? '',
@@ -518,7 +548,20 @@ export default function Search() {
                                         </button>
                                     </div>
                                 )}
-                                {!user.discord && !user.telegram && (
+                                {user.phone && (
+                                    <div className="flex items-center gap-1">
+                                        <div className="text-xs text-gray-700 truncate">Phone: {user.phone}</div>
+                                        <button
+                                            type="button"
+                                            onClick={() => copyContact(user.phone, 'Phone')}
+                                            className="text-gray-400 hover:text-indigo-600 transition-colors flex-shrink-0"
+                                            title="Copy Phone"
+                                        >
+                                            <Copy size={12} />
+                                        </button>
+                                    </div>
+                                )}
+                                {!user.discord && !user.telegram && !user.phone && (
                                     <div className="flex items-center gap-1">
                                         <div className="text-xs text-gray-700 truncate">No contact</div>
                                     </div>

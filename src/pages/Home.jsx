@@ -4,7 +4,7 @@ import { Copy, EyeOff } from 'lucide-react';
 import { ToastContainer, toast } from 'react-toastify';
 import { clearStoredUsers, loadStoredSearch, loadStoredUsers, saveStoredUsers } from '../utils/browserStorage';
 
-const hasContact = (user) => Boolean(user?.discord?.trim() || user?.telegram?.trim());
+const hasContact = (user) => Boolean(user?.discord?.trim() || user?.telegram?.trim() || user?.phone?.trim());
 
 export default function Home() {
     const [users, setUsers] = useState([]);
@@ -104,6 +104,7 @@ export default function Home() {
         return (
             user.discord?.toLowerCase().includes(q) ||
             user.telegram?.toLowerCase().includes(q) ||
+            user.phone?.toLowerCase().includes(q) ||
             user.name?.toLowerCase().includes(q) ||
             user.login?.toLowerCase().includes(q)
         );
@@ -144,7 +145,7 @@ export default function Home() {
                         <input
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Search by name, Discord, or Telegram..."
+                            placeholder="Search by name, Discord, Telegram, or phone..."
                             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500"
                         />
                     </div>
@@ -252,6 +253,20 @@ export default function Home() {
                                                     onClick={() => copyContact(user.telegram, 'Telegram')}
                                                     className="text-gray-400 hover:text-indigo-600 transition-colors flex-shrink-0"
                                                     title="Copy Telegram"
+                                                >
+                                                    <Copy size={13} />
+                                                </button>
+                                            </div>
+                                        )}
+                                        {user.phone && (
+                                            <div className="flex items-center gap-1">
+                                                <p className="text-xs text-gray-700 truncate flex-1">
+                                                    Phone: {user.phone}
+                                                </p>
+                                                <button
+                                                    onClick={() => copyContact(user.phone, 'Phone')}
+                                                    className="text-gray-400 hover:text-indigo-600 transition-colors flex-shrink-0"
+                                                    title="Copy Phone"
                                                 >
                                                     <Copy size={13} />
                                                 </button>
