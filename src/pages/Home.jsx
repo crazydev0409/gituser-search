@@ -4,7 +4,7 @@ import { Copy, EyeOff } from 'lucide-react';
 import { ToastContainer, toast } from 'react-toastify';
 import { clearStoredUsers, loadStoredSearch, loadStoredUsers, saveStoredUsers } from '../utils/browserStorage';
 
-const hasDiscord = (user) => Boolean(user?.discord?.trim());
+const hasContact = (user) => Boolean(user?.discord?.trim() || user?.telegram?.trim());
 
 export default function Home() {
     const [users, setUsers] = useState([]);
@@ -15,12 +15,12 @@ export default function Home() {
 
     useEffect(() => {
         const storedSearch = loadStoredSearch();
-        setUsers(loadStoredUsers().filter(hasDiscord));
+        setUsers(loadStoredUsers().filter(hasContact));
         setSearchParams(storedSearch.params);
 
         const handleStorage = () => {
             const nextStoredSearch = loadStoredSearch();
-            setUsers(loadStoredUsers().filter(hasDiscord));
+            setUsers(loadStoredUsers().filter(hasContact));
             setSearchParams(nextStoredSearch.params);
             setSelectedIds(new Set());
             setSelectAll(false);
@@ -46,9 +46,9 @@ export default function Home() {
         toast.success('User removed');
     };
 
-    const copyDiscord = (discord) => {
-        navigator.clipboard.writeText(discord);
-        toast.success('Discord copied!');
+    const copyContact = (contact, label) => {
+        navigator.clipboard.writeText(contact);
+        toast.success(`${label} copied!`);
     };
 
     const toggleSelect = (id) => {
@@ -98,11 +98,12 @@ export default function Home() {
     };
 
     const filteredUsers = users.filter((user) => {
-        if (!hasDiscord(user)) return false;
+        if (!hasContact(user)) return false;
         if (!searchQuery) return true;
         const q = searchQuery.toLowerCase();
         return (
             user.discord?.toLowerCase().includes(q) ||
+            user.telegram?.toLowerCase().includes(q) ||
             user.name?.toLowerCase().includes(q) ||
             user.login?.toLowerCase().includes(q)
         );
@@ -143,7 +144,7 @@ export default function Home() {
                         <input
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Search by name or Discord..."
+                            placeholder="Search by name, Discord, or Telegram..."
                             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500"
                         />
                     </div>
@@ -228,20 +229,34 @@ export default function Home() {
                                     </div>
 
                                     <div className="space-y-1 mb-3">
-                                        <div className="flex items-center gap-1">
-                                            <p className="text-xs text-gray-700 truncate flex-1">
-                                                {user.discord || 'No Discord account'}
-                                            </p>
-                                            {user.discord && (
+                                        {user.discord && (
+                                            <div className="flex items-center gap-1">
+                                                <p className="text-xs text-gray-700 truncate flex-1">
+                                                    Discord: {user.discord}
+                                                </p>
                                                 <button
-                                                    onClick={() => copyDiscord(user.discord)}
+                                                    onClick={() => copyContact(user.discord, 'Discord')}
                                                     className="text-gray-400 hover:text-indigo-600 transition-colors flex-shrink-0"
                                                     title="Copy Discord"
                                                 >
                                                     <Copy size={13} />
                                                 </button>
-                                            )}
-                                        </div>
+                                            </div>
+                                        )}
+                                        {user.telegram && (
+                                            <div className="flex items-center gap-1">
+                                                <p className="text-xs text-gray-700 truncate flex-1">
+                                                    Telegram: {user.telegram}
+                                                </p>
+                                                <button
+                                                    onClick={() => copyContact(user.telegram, 'Telegram')}
+                                                    className="text-gray-400 hover:text-indigo-600 transition-colors flex-shrink-0"
+                                                    title="Copy Telegram"
+                                                >
+                                                    <Copy size={13} />
+                                                </button>
+                                            </div>
+                                        )}
                                         <p className="text-xs text-gray-500">{user.location || 'Unknown location'}</p>
                                     </div>
 

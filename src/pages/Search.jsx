@@ -15,20 +15,35 @@ const DISCORD_PATTERNS = [
     /\b((?:https?:\/\/)?(?:www\.)?(?:dsc\.gg|discord\.me|discord\.io)\/[a-z0-9-]+)\b/i,
 ];
 
-const extractDiscordAccount = (profile) => {
+const TELEGRAM_PATTERNS = [
+    /\btelegram(?:\s*(?::|=|-|is|@|handle|user(?:name)?))\s*(@?[a-z0-9_]{5,32})\b/i,
+    /\btg(?:\s*(?::|=|-|is|@|handle|user(?:name)?))\s*(@?[a-z0-9_]{5,32})\b/i,
+    /\b((?:https?:\/\/)?(?:www\.)?t\.me\/[a-z0-9_]{5,32})\b/i,
+    /\b((?:https?:\/\/)?(?:www\.)?telegram\.me\/[a-z0-9_]{5,32})\b/i,
+    /\b((?:https?:\/\/)?(?:www\.)?telegram\.dog\/[a-z0-9_]{5,32})\b/i,
+];
+
+const cleanContact = (contact) => contact.trim().replace(/[),.;]+$/, '');
+
+const extractContact = (profile, patterns) => {
     const fields = [profile?.bio, profile?.blog, profile?.company].filter(Boolean);
 
     for (const field of fields) {
-        for (const pattern of DISCORD_PATTERNS) {
+        for (const pattern of patterns) {
             const match = String(field).match(pattern);
-            if (match?.[1]) return match[1].trim().replace(/[),.;]+$/, '');
+            if (match?.[1]) return cleanContact(match[1]);
         }
     }
 
     return '';
 };
 
-const hasDiscord = (user) => Boolean(user?.discord?.trim());
+const extractCommunicationContacts = (profile) => ({
+    discord: extractContact(profile, DISCORD_PATTERNS),
+    telegram: extractContact(profile, TELEGRAM_PATTERNS),
+});
+
+const hasContact = (user) => Boolean(user?.discord?.trim() || user?.telegram?.trim());
 
 const REQUEST_TIMEOUT_MS = 30000;
 const secondaryLookupOptions = { stopOnRateLimit: false };
@@ -55,7 +70,7 @@ export default function Search() {
 
     useEffect(() => {
         const storedSearch = loadStoredSearch();
-        setUsers(storedSearch.users.filter(hasDiscord));
+        setUsers(storedSearch.users.filter(hasContact));
 
         if (storedSearch.params) {
             setLocation(storedSearch.params.location || 'Australia');
@@ -113,11 +128,11 @@ export default function Search() {
         const profileResults = await Promise.allSettled(
             searchUsers.map((user) => detailQueue.enqueue(async () => {
                 const { data } = await safeAxiosGet(`/users/${user.login}`, {}, 1, secondaryLookupOptions);
-                const discord = extractDiscordAccount(data);
+                const contacts = extractCommunicationContacts(data);
                 return {
                     ...user,
                     name: data?.name || user.login,
-                    discord,
+                    ...contacts,
                     location: data?.location || user.location || '',
                     company: data?.company || '',
                     bio: data?.bio || '',
@@ -134,31 +149,32 @@ export default function Search() {
                 ...searchUsers[index],
                 name: searchUsers[index]?.login || '',
                 discord: '',
+                telegram: '',
                 location: searchUsers[index]?.location || '',
             };
         });
     }
 
-    const findDiscord = async (user) => {
+    const findContacts = async (user) => {
         try {
             const profileRes = await safeAxiosGet(`/users/${user.login}`, {}, 1, secondaryLookupOptions);
-            const discord = extractDiscordAccount(profileRes.data);
+            const contacts = extractCommunicationContacts(profileRes.data);
 
-            if (discord) {
+            if (hasContact(contacts)) {
                 updateStoredUsers((prev) => prev.map((item) => item.id === user.id ? {
                     ...item,
                     name: profileRes.data?.name || user.login,
-                    discord,
+                    ...contacts,
                     location: profileRes.data?.location || '',
                     company: profileRes.data?.company || '',
                     bio: profileRes.data?.bio || '',
                 } : item));
-                toast.success('Discord account found!');
+                toast.success('Communication contact found!');
             } else {
-                toast.warning('No Discord account found for this user');
+                toast.warning('No Discord or Telegram contact found for this user');
             }
         } catch {
-            toast.error('Discord lookup failed');
+            toast.error('Contact lookup failed');
         }
     };
 
@@ -167,12 +183,12 @@ export default function Search() {
         toast.success('User removed');
     };
 
-    const copyDiscord = async (discord) => {
+    const copyContact = async (contact, label) => {
         try {
-            await navigator.clipboard.writeText(discord);
-            toast.success('Discord copied!');
+            await navigator.clipboard.writeText(contact);
+            toast.success(`${label} copied!`);
         } catch {
-            toast.error('Failed to copy Discord');
+            toast.error(`Failed to copy ${label}`);
         }
     };
 
@@ -182,6 +198,7 @@ export default function Search() {
             login: user.login ?? '',
             name: user.name || user.login || '',
             discord: user.discord || '',
+            telegram: user.telegram || '',
             avatar_url: user.avatar_url,
             html_url: user.html_url,
             location: user.location ?? '',
@@ -296,7 +313,7 @@ export default function Search() {
 
                 if (newItems.length > 0) {
                     const hydratedUsers = await hydrateUsersWithProfiles(newItems);
-                    const localUsers = makeLocalFetchedUsers(hydratedUsers).filter(hasDiscord);
+                    const localUsers = makeLocalFetchedUsers(hydratedUsers).filter(hasContact);
                     if (!localUsers.length) return;
 
                     newUsersDisplayed += localUsers.length;
@@ -475,27 +492,45 @@ export default function Search() {
                                 <div className="text-sm font-semibold truncate">{user.name || user.login}</div>
                                 <div className="text-xs text-gray-500 truncate">@{user.login}</div>
                                 <div className="text-xs text-gray-500 truncate">{user.location || 'Unknown'}</div>
-                                <div className="flex items-center gap-1">
-                                    <div className="text-xs text-gray-700 truncate">{user.discord || 'No Discord account'}</div>
-                                    {user.discord && (
+                                {user.discord && (
+                                    <div className="flex items-center gap-1">
+                                        <div className="text-xs text-gray-700 truncate">Discord: {user.discord}</div>
                                         <button
                                             type="button"
-                                            onClick={() => copyDiscord(user.discord)}
+                                            onClick={() => copyContact(user.discord, 'Discord')}
                                             className="text-gray-400 hover:text-indigo-600 transition-colors flex-shrink-0"
                                             title="Copy Discord"
                                         >
                                             <Copy size={12} />
                                         </button>
-                                    )}
-                                </div>
+                                    </div>
+                                )}
+                                {user.telegram && (
+                                    <div className="flex items-center gap-1">
+                                        <div className="text-xs text-gray-700 truncate">Telegram: {user.telegram}</div>
+                                        <button
+                                            type="button"
+                                            onClick={() => copyContact(user.telegram, 'Telegram')}
+                                            className="text-gray-400 hover:text-indigo-600 transition-colors flex-shrink-0"
+                                            title="Copy Telegram"
+                                        >
+                                            <Copy size={12} />
+                                        </button>
+                                    </div>
+                                )}
+                                {!user.discord && !user.telegram && (
+                                    <div className="flex items-center gap-1">
+                                        <div className="text-xs text-gray-700 truncate">No contact</div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                         <div className="flex gap-1.5">
                             <button
-                                onClick={() => findDiscord(user)}
+                                onClick={() => findContacts(user)}
                                 className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-1 rounded text-xs font-medium transition-colors"
                             >
-                                Find Discord
+                                Find Contact
                             </button>
                             <button
                                 onClick={() => hideUser(user)}
