@@ -72,6 +72,22 @@ const extractCommunicationContacts = (profile) => ({
 });
 
 const hasContact = (user) => Boolean(user?.discord?.trim() || user?.telegram?.trim() || user?.phone?.trim());
+const CONTACT_SEARCH_TERMS = [
+    'discord',
+    'discord.gg',
+    'discord.com',
+    'discordapp.com',
+    'dsc.gg',
+    'telegram',
+    't.me',
+    'telegram.me',
+    'telegram.dog',
+    'phone',
+    'mobile',
+    'whatsapp',
+    'telephone',
+];
+const DEVELOPMENT_EXPERIENCE_QUALIFIER = 'repos:>0';
 
 const REQUEST_TIMEOUT_MS = 30000;
 const secondaryLookupOptions = { stopOnRateLimit: false };
@@ -98,7 +114,7 @@ export default function Search() {
 
     useEffect(() => {
         const storedSearch = loadStoredSearch();
-        setUsers(storedSearch.users.filter(hasContact));
+        setUsers(storedSearch.users);
 
         if (storedSearch.params) {
             setLocation(storedSearch.params.location || 'Australia');
@@ -281,15 +297,21 @@ export default function Search() {
             });
             current = next;
         }
+        const searchQueries = monthRanges.flatMap((range) =>
+            CONTACT_SEARCH_TERMS.map((contactTerm) => ({
+                ...range,
+                contactTerm,
+            }))
+        );
 
         setSearchProgress({
-            totalMonths: monthRanges.length,
+            totalMonths: searchQueries.length,
             completedMonths: 0,
             totalUsersFound: 0,
             newUsersDisplayed: 0,
         });
 
-        const queue = new ThrottledQueue({ concurrency: 2, intervalMs: 2100 });
+        const queue = new ThrottledQueue({ concurrency: 1, intervalMs: 2100 });
         queueRef.current = queue;
 
         let completedMonths = 0;
@@ -300,14 +322,14 @@ export default function Search() {
 
         const updateSearchProgress = () => {
             setSearchProgress({
-                totalMonths: monthRanges.length,
+                totalMonths: searchQueries.length,
                 completedMonths,
                 totalUsersFound,
                 newUsersDisplayed,
             });
         };
 
-        const tasks = monthRanges.map((range) => {
+        const tasks = searchQueries.map((range) => {
             return queue.enqueue(async () => {
                 if (stopRequested.current) return [];
 
@@ -315,9 +337,11 @@ export default function Search() {
                     `location:${location}`,
                     `type:User`,
                     `created:${range.start}..${range.end}`,
+                    DEVELOPMENT_EXPERIENCE_QUALIFIER,
                     minFollowers > 0 ? `followers:>=${minFollowers}` : null,
                     language ? `language:${language}` : null,
                     bioKeyword ? `in:bio ${bioKeyword}` : null,
+                    range.contactTerm,
                 ]
                     .filter(Boolean)
                     .join(' ');
@@ -331,19 +355,14 @@ export default function Search() {
                 return res.data.items || [];
             }).then(async (items) => {
                 completedMonths++;
-                totalUsersFound += items.length;
-                updateSearchProgress();
-
-                if (!items.length) {
-                    return;
-                }
-
                 const newItems = items.filter((u) => !knownLogins.has(u.login));
                 for (const u of newItems) knownLogins.add(u.login);
+                totalUsersFound += newItems.length;
+                updateSearchProgress();
 
                 if (newItems.length > 0) {
                     const hydratedUsers = await hydrateUsersWithProfiles(newItems);
-                    const localUsers = makeLocalFetchedUsers(hydratedUsers).filter(hasContact);
+                    const localUsers = makeLocalFetchedUsers(hydratedUsers);
                     if (!localUsers.length) return;
 
                     newUsersDisplayed += localUsers.length;
@@ -362,7 +381,7 @@ export default function Search() {
                 if (err?.name === 'AbortError' || stopRequested.current) {
                     return;
                 }
-                if (completedMonths < monthRanges.length) completedMonths++;
+                if (completedMonths < searchQueries.length) completedMonths++;
                 updateSearchProgress();
                 console.error('Search month failed:', err);
                 toast.error('A search month failed. Check the console for details.');
@@ -494,8 +513,8 @@ export default function Search() {
             {loading && searchProgress.totalMonths > 0 && (
                 <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg mt-4">
                     <div className="flex justify-between text-sm text-blue-800 mb-2">
-                        <span>Processing: {searchProgress.completedMonths}/{searchProgress.totalMonths} months</span>
-                        <span>Found: {searchProgress.totalUsersFound} users ({searchProgress.newUsersDisplayed} displayed)</span>
+                        <span>Processing: {searchProgress.completedMonths}/{searchProgress.totalMonths} contact queries</span>
+                        <span>Matched: {searchProgress.totalUsersFound} unique users</span>
                     </div>
                     <div className="w-full bg-blue-200 rounded-full h-2">
                         <div

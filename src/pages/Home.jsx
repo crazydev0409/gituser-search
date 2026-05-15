@@ -4,8 +4,6 @@ import { Copy, EyeOff } from 'lucide-react';
 import { ToastContainer, toast } from 'react-toastify';
 import { clearStoredUsers, loadStoredSearch, loadStoredUsers, saveStoredUsers } from '../utils/browserStorage';
 
-const hasContact = (user) => Boolean(user?.discord?.trim() || user?.telegram?.trim() || user?.phone?.trim());
-
 export default function Home() {
     const [users, setUsers] = useState([]);
     const [searchParams, setSearchParams] = useState(null);
@@ -15,12 +13,12 @@ export default function Home() {
 
     useEffect(() => {
         const storedSearch = loadStoredSearch();
-        setUsers(loadStoredUsers().filter(hasContact));
+        setUsers(loadStoredUsers());
         setSearchParams(storedSearch.params);
 
         const handleStorage = () => {
             const nextStoredSearch = loadStoredSearch();
-            setUsers(loadStoredUsers().filter(hasContact));
+            setUsers(loadStoredUsers());
             setSearchParams(nextStoredSearch.params);
             setSelectedIds(new Set());
             setSelectAll(false);
@@ -98,7 +96,6 @@ export default function Home() {
     };
 
     const filteredUsers = users.filter((user) => {
-        if (!hasContact(user)) return false;
         if (!searchQuery) return true;
         const q = searchQuery.toLowerCase();
         return (
