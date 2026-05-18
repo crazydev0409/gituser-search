@@ -87,7 +87,6 @@ const CONTACT_SEARCH_TERMS = [
     'whatsapp',
     'telephone',
 ];
-const DEVELOPMENT_EXPERIENCE_QUALIFIER = 'repos:>0';
 
 const REQUEST_TIMEOUT_MS = 30000;
 const secondaryLookupOptions = { stopOnRateLimit: false };
@@ -322,7 +321,7 @@ export default function Search() {
 
         const updateSearchProgress = () => {
             setSearchProgress({
-                totalMonths: searchQueries.length,
+                totalMonths: monthRanges.length,
                 completedMonths,
                 totalUsersFound,
                 newUsersDisplayed,
@@ -337,7 +336,6 @@ export default function Search() {
                     `location:${location}`,
                     `type:User`,
                     `created:${range.start}..${range.end}`,
-                    DEVELOPMENT_EXPERIENCE_QUALIFIER,
                     minFollowers > 0 ? `followers:>=${minFollowers}` : null,
                     language ? `language:${language}` : null,
                     bioKeyword ? `in:bio ${bioKeyword}` : null,
