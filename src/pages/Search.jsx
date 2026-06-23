@@ -17,17 +17,45 @@ const hasEmail = (user) => Boolean(user?.email?.trim());
 const EMAIL_SEARCH_TERMS = [
     'gmail.com',
     'outlook.com',
-    'yahoo.com',
-    'hotmail.com',
-    'proton.me',
-    'icloud.com',
-    'email',
+    'in:bio @',
 ];
 
 const DEVELOPMENT_EXPERIENCE_QUALIFIER = 'repos:>0';
 
 const REQUEST_TIMEOUT_MS = 30000;
-const secondaryLookupOptions = { stopOnRateLimit: false };
+const SEARCH_QUEUE_INTERVAL_MS = 2500;
+const PROFILE_QUEUE_INTERVAL_MS = 3000;
+const MAX_RATE_LIMIT_RETRIES = 15;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRateLimitError = (err) => {
+    if (err?.response?.status !== 403) return false;
+    const headers = err.response.headers || {};
+    const remaining = headers['x-ratelimit-remaining'];
+    if (remaining === '0') return true;
+    const message = String(err.response.data?.message || '').toLowerCase();
+    return message.includes('rate limit') || message.includes('secondary rate limit');
+};
+
+const getRateLimitWaitMs = (err) => {
+    const headers = err?.response?.headers || {};
+    const retryAfter = headers['retry-after'];
+    if (retryAfter) {
+        const seconds = Number(retryAfter);
+        if (!Number.isNaN(seconds) && seconds > 0) {
+            return (seconds + 1) * 1000;
+        }
+    }
+
+    const reset = Number(headers['x-ratelimit-reset']);
+    if (!Number.isNaN(reset) && reset > 0) {
+        const wait = reset * 1000 - Date.now() + 1500;
+        if (wait > 0) return Math.min(wait, 5 * 60 * 1000);
+    }
+
+    return 60000;
+};
 
 export default function Search() {
     const [users, setUsers] = useState([]);
@@ -76,7 +104,11 @@ export default function Search() {
         });
     };
 
-    async function safeAxiosGet(url, options = {}, retries = 3, behavior = { stopOnRateLimit: true }) {
+    async function safeAxiosGet(url, options = {}, retries = 3, rateLimitRetries = 0) {
+        if (stopRequested.current) {
+            throw new DOMException('Search stopped', 'AbortError');
+        }
+
         try {
             return await Axios.get(url, {
                 ...options,
@@ -86,20 +118,26 @@ export default function Search() {
                 },
             });
         } catch (err) {
-            if (err?.response?.status === 403) {
-                if (behavior.stopOnRateLimit) {
-                    if (!rateLimitToastShown.current) {
-                        toast.error('GitHub rate limit hit! Pausing...');
-                        rateLimitToastShown.current = true;
-                    }
-                    stopRequested.current = true;
-                    if (queueRef.current) queueRef.current.abort();
+            if (err?.name === 'AbortError') throw err;
+
+            if (isRateLimitError(err) && rateLimitRetries < MAX_RATE_LIMIT_RETRIES) {
+                const waitMs = getRateLimitWaitMs(err);
+                if (!rateLimitToastShown.current) {
+                    const waitSeconds = Math.ceil(waitMs / 1000);
+                    toast.info(`GitHub rate limit reached. Resuming in ${waitSeconds}s...`);
+                    rateLimitToastShown.current = true;
                 }
-                throw err;
+                await sleep(waitMs);
+                rateLimitToastShown.current = false;
+                return safeAxiosGet(url, options, retries, rateLimitRetries + 1);
             }
+
             const status = err?.response?.status;
             if (status >= 400 && status < 500) throw err;
-            if (retries > 0) return safeAxiosGet(url, options, retries - 1, behavior);
+            if (retries > 0) {
+                await sleep(1500);
+                return safeAxiosGet(url, options, retries - 1, rateLimitRetries);
+            }
             throw err;
         }
     }
@@ -109,7 +147,7 @@ export default function Search() {
             const res = await safeAxiosGet('/search/commits', {
                 params: { q: `author:${username}`, per_page: 30 },
                 headers: { Accept: 'application/vnd.github.cloak-preview' },
-            }, 1, secondaryLookupOptions);
+            }, 1);
 
             const emails = new Set();
             for (const item of res.data.items || []) {
@@ -128,7 +166,7 @@ export default function Search() {
         while (true) {
             const { data } = await safeAxiosGet(`/users/${username}/repos`, {
                 params: { per_page: 100, page },
-            }, 1, secondaryLookupOptions);
+            }, 1);
             if (!data?.length) break;
             repos.push(...data);
             if (data.length < 100 || page > 5) break;
@@ -142,7 +180,7 @@ export default function Search() {
         for (let page = 1; page <= maxPages; page++) {
             const { data } = await safeAxiosGet(`/repos/${owner}/${repo}/commits`, {
                 params: { author, per_page: 100, page },
-            }, 1, secondaryLookupOptions);
+            }, 1);
             if (!data?.length) break;
             for (const c of data) {
                 const gitEmail = c.commit?.author?.email;
@@ -158,7 +196,7 @@ export default function Search() {
         }
 
         if (knownProfileEmail === undefined) {
-            const profile = await safeAxiosGet(`/users/${username}`, {}, 1, secondaryLookupOptions);
+            const profile = await safeAxiosGet(`/users/${username}`, {}, 1);
             if (profile.data?.email && !isNoreply(profile.data.email)) {
                 return profile.data.email;
             }
@@ -183,10 +221,10 @@ export default function Search() {
     }
 
     async function hydrateUsersWithProfiles(searchUsers) {
-        const detailQueue = new ThrottledQueue({ concurrency: 1, intervalMs: 2500 });
+        const detailQueue = new ThrottledQueue({ concurrency: 1, intervalMs: PROFILE_QUEUE_INTERVAL_MS });
         const profileResults = await Promise.allSettled(
             searchUsers.map((user) => detailQueue.enqueue(async () => {
-                const { data } = await safeAxiosGet(`/users/${user.login}`, {}, 1, secondaryLookupOptions);
+                const { data } = await safeAxiosGet(`/users/${user.login}`, {}, 1);
                 const email = await collectEmailFromUser(user.login, data?.email);
                 return {
                     ...user,
@@ -215,7 +253,7 @@ export default function Search() {
 
     const findEmail = async (user) => {
         try {
-            const profileRes = await safeAxiosGet(`/users/${user.login}`, {}, 1, secondaryLookupOptions);
+            const profileRes = await safeAxiosGet(`/users/${user.login}`, {}, 1);
             const email = profileRes.data?.email || (await collectEmailFromUser(user.login));
 
             if (email) {
@@ -320,7 +358,7 @@ export default function Search() {
             newUsersDisplayed: 0,
         });
 
-        const queue = new ThrottledQueue({ concurrency: 1, intervalMs: 2100 });
+        const queue = new ThrottledQueue({ concurrency: 1, intervalMs: SEARCH_QUEUE_INTERVAL_MS });
         queueRef.current = queue;
 
         let completedMonths = 0;
@@ -363,10 +401,8 @@ export default function Search() {
 
                 return res.data.items || [];
             }).then(async (items) => {
-                completedMonths++;
                 const newItems = items.filter((u) => !knownLogins.has(u.login));
                 for (const u of newItems) knownLogins.add(u.login);
-                updateSearchProgress();
 
                 if (newItems.length > 0) {
                     const hydratedUsers = await hydrateUsersWithProfiles(newItems);
@@ -379,7 +415,6 @@ export default function Search() {
                         ...finalizedUsers,
                         ...localUsers,
                     ];
-                    updateSearchProgress();
 
                     updateStoredUsers((prev) => [
                         ...prev,
@@ -390,10 +425,14 @@ export default function Search() {
                 if (err?.name === 'AbortError' || stopRequested.current) {
                     return;
                 }
-                if (completedMonths < searchQueries.length) completedMonths++;
+                if (isRateLimitError(err)) {
+                    console.warn('Search query exhausted rate-limit retries:', err);
+                    return;
+                }
+                console.error('Search query failed:', err);
+            }).finally(() => {
+                completedMonths++;
                 updateSearchProgress();
-                console.error('Search month failed:', err);
-                toast.error('A search month failed. Check the console for details.');
             });
         });
 

@@ -39,7 +39,14 @@ module.exports = async function handler(req, res) {
             },
         });
 
-        for (const header of ['x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset']) {
+        for (const header of [
+            'x-ratelimit-limit',
+            'x-ratelimit-remaining',
+            'x-ratelimit-reset',
+            'x-ratelimit-used',
+            'x-ratelimit-resource',
+            'retry-after',
+        ]) {
             const value = githubResponse.headers.get(header);
             if (value) res.setHeader(header, value);
         }
