@@ -6,87 +6,25 @@ import { Copy } from 'lucide-react';
 import { ThrottledQueue } from '../utils/requestQueue';
 import { loadStoredSearch, mergeStoredUsers, saveStoredSearch } from '../utils/browserStorage';
 
-const DISCORD_PATTERNS = [
-    /\bdiscord(?:\s*(?::|=|-|is|@|handle|user(?:name)?))\s*(@?[a-z0-9_.]{2,32}#\d{4}|@?[a-z0-9_.]{2,32})\b/i,
-    /\b([a-z0-9_.]{2,32}#\d{4})\b/i,
-    /\b((?:https?:\/\/)?(?:www\.)?discord(?:app)?\.com\/users\/\d{17,20})\b/i,
-    /\b((?:https?:\/\/)?(?:www\.)?discord(?:app)?\.com\/invite\/[a-z0-9-]+)\b/i,
-    /\b((?:https?:\/\/)?(?:www\.)?discord\.gg\/[a-z0-9-]+)\b/i,
-    /\b((?:https?:\/\/)?(?:www\.)?(?:dsc\.gg|discord\.me|discord\.io)\/[a-z0-9-]+)\b/i,
-];
-
-const TELEGRAM_PATTERNS = [
-    /\btelegram(?:\s*(?::|=|-|is|@|handle|user(?:name)?))\s*(@?[a-z0-9_]{5,32})\b/i,
-    /\btg(?:\s*(?::|=|-|is|@|handle|user(?:name)?))\s*(@?[a-z0-9_]{5,32})\b/i,
-    /\b((?:https?:\/\/)?(?:www\.)?t\.me\/[a-z0-9_]{5,32})\b/i,
-    /\b((?:https?:\/\/)?(?:www\.)?telegram\.me\/[a-z0-9_]{5,32})\b/i,
-    /\b((?:https?:\/\/)?(?:www\.)?telegram\.dog\/[a-z0-9_]{5,32})\b/i,
-];
-
-const PHONE_PATTERNS = [
-    /\b(?:phone|mobile|cell|tel|telephone|whatsapp|wa)(?:\s*(?::|=|-|is))\s*((?:\+|00)?\d[\d\s().-]{6,}\d)\b/i,
-    /\b((?:\+|00)\d[\d\s().-]{6,}\d)\b/,
-];
-
-const cleanContact = (contact) => contact.trim().replace(/[),.;]+$/, '');
-const cleanPhoneNumber = (phone) => cleanContact(phone).replace(/\s+/g, ' ');
-
-const isLikelyPhoneNumber = (phone) => {
-    const digits = phone.replace(/\D/g, '');
-    return digits.length >= 7 && digits.length <= 15;
+const isNoreply = (email) => {
+    if (!email) return true;
+    const e = email.toLowerCase();
+    return e.includes('noreply') || e.includes('@users.noreply.github.com');
 };
 
-const extractContact = (profile, patterns) => {
-    const fields = [profile?.bio, profile?.blog, profile?.company].filter(Boolean);
+const hasEmail = (user) => Boolean(user?.email?.trim());
 
-    for (const field of fields) {
-        for (const pattern of patterns) {
-            const match = String(field).match(pattern);
-            if (match?.[1]) return cleanContact(match[1]);
-        }
-    }
-
-    return '';
-};
-
-const extractPhoneNumber = (profile) => {
-    const fields = [profile?.bio, profile?.blog, profile?.company].filter(Boolean);
-
-    for (const field of fields) {
-        for (const pattern of PHONE_PATTERNS) {
-            const match = String(field).match(pattern);
-            if (match?.[1]) {
-                const phone = cleanPhoneNumber(match[1]);
-                if (isLikelyPhoneNumber(phone)) return phone;
-            }
-        }
-    }
-
-    return '';
-};
-
-const extractCommunicationContacts = (profile) => ({
-    discord: extractContact(profile, DISCORD_PATTERNS),
-    telegram: extractContact(profile, TELEGRAM_PATTERNS),
-    phone: extractPhoneNumber(profile),
-});
-
-const hasContact = (user) => Boolean(user?.discord?.trim() || user?.telegram?.trim() || user?.phone?.trim());
-const CONTACT_SEARCH_TERMS = [
-    'discord',
-    'discord.gg',
-    'discord.com',
-    'discordapp.com',
-    'dsc.gg',
-    'telegram',
-    't.me',
-    'telegram.me',
-    'telegram.dog',
-    'phone',
-    'mobile',
-    'whatsapp',
-    'telephone',
+const EMAIL_SEARCH_TERMS = [
+    'gmail.com',
+    'outlook.com',
+    'yahoo.com',
+    'hotmail.com',
+    'proton.me',
+    'icloud.com',
+    'email',
 ];
+
+const DEVELOPMENT_EXPERIENCE_QUALIFIER = 'repos:>0';
 
 const REQUEST_TIMEOUT_MS = 30000;
 const secondaryLookupOptions = { stopOnRateLimit: false };
@@ -113,7 +51,7 @@ export default function Search() {
 
     useEffect(() => {
         const storedSearch = loadStoredSearch();
-        setUsers(storedSearch.users);
+        setUsers(storedSearch.users.filter(hasEmail));
 
         if (storedSearch.params) {
             setLocation(storedSearch.params.location || 'Australia');
@@ -166,16 +104,94 @@ export default function Search() {
         }
     }
 
+    async function searchUserCommitsGlobal(username) {
+        try {
+            const res = await safeAxiosGet('/search/commits', {
+                params: { q: `author:${username}`, per_page: 30 },
+                headers: { Accept: 'application/vnd.github.cloak-preview' },
+            }, 1, secondaryLookupOptions);
+
+            const emails = new Set();
+            for (const item of res.data.items || []) {
+                const email = item.commit?.author?.email;
+                if (email && !isNoreply(email)) emails.add(email);
+            }
+            return Array.from(emails);
+        } catch {
+            return [];
+        }
+    }
+
+    async function getUserRepos(username) {
+        const repos = [];
+        let page = 1;
+        while (true) {
+            const { data } = await safeAxiosGet(`/users/${username}/repos`, {
+                params: { per_page: 100, page },
+            }, 1, secondaryLookupOptions);
+            if (!data?.length) break;
+            repos.push(...data);
+            if (data.length < 100 || page > 5) break;
+            page++;
+        }
+        return repos;
+    }
+
+    async function getRepoCommits(owner, repo, author, maxPages = 2) {
+        const emails = new Set();
+        for (let page = 1; page <= maxPages; page++) {
+            const { data } = await safeAxiosGet(`/repos/${owner}/${repo}/commits`, {
+                params: { author, per_page: 100, page },
+            }, 1, secondaryLookupOptions);
+            if (!data?.length) break;
+            for (const c of data) {
+                const gitEmail = c.commit?.author?.email;
+                if (gitEmail && !isNoreply(gitEmail)) emails.add(gitEmail);
+            }
+        }
+        return Array.from(emails);
+    }
+
+    async function collectEmailFromUser(username, knownProfileEmail) {
+        if (knownProfileEmail && !isNoreply(knownProfileEmail)) {
+            return knownProfileEmail;
+        }
+
+        if (knownProfileEmail === undefined) {
+            const profile = await safeAxiosGet(`/users/${username}`, {}, 1, secondaryLookupOptions);
+            if (profile.data?.email && !isNoreply(profile.data.email)) {
+                return profile.data.email;
+            }
+        }
+
+        const global = await searchUserCommitsGlobal(username);
+        if (global.length) return global[0];
+
+        try {
+            const repos = await getUserRepos(username);
+            const repoEmailResults = await Promise.allSettled(
+                repos.slice(0, 3).map((r) => getRepoCommits(r.owner.login, r.name, username, 1))
+            );
+            const repoEmails = repoEmailResults
+                .filter((result) => result.status === 'fulfilled')
+                .flatMap((result) => result.value);
+            if (repoEmails.length) return repoEmails[0];
+        } catch {
+            return null;
+        }
+        return null;
+    }
+
     async function hydrateUsersWithProfiles(searchUsers) {
         const detailQueue = new ThrottledQueue({ concurrency: 1, intervalMs: 2500 });
         const profileResults = await Promise.allSettled(
             searchUsers.map((user) => detailQueue.enqueue(async () => {
                 const { data } = await safeAxiosGet(`/users/${user.login}`, {}, 1, secondaryLookupOptions);
-                const contacts = extractCommunicationContacts(data);
+                const email = await collectEmailFromUser(user.login, data?.email);
                 return {
                     ...user,
                     name: data?.name || user.login,
-                    ...contacts,
+                    email: email || '',
                     location: data?.location || user.location || '',
                     company: data?.company || '',
                     bio: data?.bio || '',
@@ -191,34 +207,30 @@ export default function Search() {
             return {
                 ...searchUsers[index],
                 name: searchUsers[index]?.login || '',
-                discord: '',
-                telegram: '',
-                phone: '',
+                email: '',
                 location: searchUsers[index]?.location || '',
             };
         });
     }
 
-    const findContacts = async (user) => {
+    const findEmail = async (user) => {
         try {
             const profileRes = await safeAxiosGet(`/users/${user.login}`, {}, 1, secondaryLookupOptions);
-            const contacts = extractCommunicationContacts(profileRes.data);
+            const email = profileRes.data?.email || (await collectEmailFromUser(user.login));
 
-            if (hasContact(contacts)) {
+            if (email) {
                 updateStoredUsers((prev) => prev.map((item) => item.id === user.id ? {
                     ...item,
                     name: profileRes.data?.name || user.login,
-                    ...contacts,
+                    email,
                     location: profileRes.data?.location || '',
-                    company: profileRes.data?.company || '',
-                    bio: profileRes.data?.bio || '',
                 } : item));
-                toast.success('Communication contact found!');
+                toast.success('Email found!');
             } else {
-                toast.warning('No Discord, Telegram, or phone contact found for this user');
+                toast.warning('No email found for this user');
             }
         } catch {
-            toast.error('Contact lookup failed');
+            toast.error('Email lookup failed');
         }
     };
 
@@ -227,12 +239,12 @@ export default function Search() {
         toast.success('User removed');
     };
 
-    const copyContact = async (contact, label) => {
+    const copyEmail = async (email) => {
         try {
-            await navigator.clipboard.writeText(contact);
-            toast.success(`${label} copied!`);
+            await navigator.clipboard.writeText(email);
+            toast.success('Email copied!');
         } catch {
-            toast.error(`Failed to copy ${label}`);
+            toast.error('Failed to copy email');
         }
     };
 
@@ -241,9 +253,7 @@ export default function Search() {
             id: user.login,
             login: user.login ?? '',
             name: user.name || user.login || '',
-            discord: user.discord || '',
-            telegram: user.telegram || '',
-            phone: user.phone || '',
+            email: user.email || '',
             avatar_url: user.avatar_url,
             html_url: user.html_url,
             location: user.location ?? '',
@@ -297,9 +307,9 @@ export default function Search() {
             current = next;
         }
         const searchQueries = monthRanges.flatMap((range) =>
-            CONTACT_SEARCH_TERMS.map((contactTerm) => ({
+            EMAIL_SEARCH_TERMS.map((emailTerm) => ({
                 ...range,
-                contactTerm,
+                emailTerm,
             }))
         );
 
@@ -321,7 +331,7 @@ export default function Search() {
 
         const updateSearchProgress = () => {
             setSearchProgress({
-                totalMonths: monthRanges.length,
+                totalMonths: searchQueries.length,
                 completedMonths,
                 totalUsersFound,
                 newUsersDisplayed,
@@ -336,10 +346,11 @@ export default function Search() {
                     `location:${location}`,
                     `type:User`,
                     `created:${range.start}..${range.end}`,
+                    DEVELOPMENT_EXPERIENCE_QUALIFIER,
                     minFollowers > 0 ? `followers:>=${minFollowers}` : null,
                     language ? `language:${language}` : null,
                     bioKeyword ? `in:bio ${bioKeyword}` : null,
-                    range.contactTerm,
+                    range.emailTerm,
                 ]
                     .filter(Boolean)
                     .join(' ');
@@ -355,14 +366,14 @@ export default function Search() {
                 completedMonths++;
                 const newItems = items.filter((u) => !knownLogins.has(u.login));
                 for (const u of newItems) knownLogins.add(u.login);
-                totalUsersFound += newItems.length;
                 updateSearchProgress();
 
                 if (newItems.length > 0) {
                     const hydratedUsers = await hydrateUsersWithProfiles(newItems);
-                    const localUsers = makeLocalFetchedUsers(hydratedUsers);
+                    const localUsers = makeLocalFetchedUsers(hydratedUsers).filter(hasEmail);
                     if (!localUsers.length) return;
 
+                    totalUsersFound += localUsers.length;
                     newUsersDisplayed += localUsers.length;
                     finalizedUsers = [
                         ...finalizedUsers,
@@ -511,8 +522,8 @@ export default function Search() {
             {loading && searchProgress.totalMonths > 0 && (
                 <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg mt-4">
                     <div className="flex justify-between text-sm text-blue-800 mb-2">
-                        <span>Processing: {searchProgress.completedMonths}/{searchProgress.totalMonths} contact queries</span>
-                        <span>Matched: {searchProgress.totalUsersFound} unique users</span>
+                        <span>Processing: {searchProgress.completedMonths}/{searchProgress.totalMonths} searches</span>
+                        <span>Matched: {searchProgress.totalUsersFound} users with email</span>
                     </div>
                     <div className="w-full bg-blue-200 rounded-full h-2">
                         <div
@@ -539,58 +550,27 @@ export default function Search() {
                                 <div className="text-sm font-semibold truncate">{user.name || user.login}</div>
                                 <div className="text-xs text-gray-500 truncate">@{user.login}</div>
                                 <div className="text-xs text-gray-500 truncate">{user.location || 'Unknown'}</div>
-                                {user.discord && (
-                                    <div className="flex items-center gap-1">
-                                        <div className="text-xs text-gray-700 truncate">Discord: {user.discord}</div>
+                                <div className="flex items-center gap-1">
+                                    <div className="text-xs text-gray-700 truncate">{user.email || 'No email'}</div>
+                                    {user.email && (
                                         <button
                                             type="button"
-                                            onClick={() => copyContact(user.discord, 'Discord')}
+                                            onClick={() => copyEmail(user.email)}
                                             className="text-gray-400 hover:text-indigo-600 transition-colors flex-shrink-0"
-                                            title="Copy Discord"
+                                            title="Copy email"
                                         >
                                             <Copy size={12} />
                                         </button>
-                                    </div>
-                                )}
-                                {user.telegram && (
-                                    <div className="flex items-center gap-1">
-                                        <div className="text-xs text-gray-700 truncate">Telegram: {user.telegram}</div>
-                                        <button
-                                            type="button"
-                                            onClick={() => copyContact(user.telegram, 'Telegram')}
-                                            className="text-gray-400 hover:text-indigo-600 transition-colors flex-shrink-0"
-                                            title="Copy Telegram"
-                                        >
-                                            <Copy size={12} />
-                                        </button>
-                                    </div>
-                                )}
-                                {user.phone && (
-                                    <div className="flex items-center gap-1">
-                                        <div className="text-xs text-gray-700 truncate">Phone: {user.phone}</div>
-                                        <button
-                                            type="button"
-                                            onClick={() => copyContact(user.phone, 'Phone')}
-                                            className="text-gray-400 hover:text-indigo-600 transition-colors flex-shrink-0"
-                                            title="Copy Phone"
-                                        >
-                                            <Copy size={12} />
-                                        </button>
-                                    </div>
-                                )}
-                                {!user.discord && !user.telegram && !user.phone && (
-                                    <div className="flex items-center gap-1">
-                                        <div className="text-xs text-gray-700 truncate">No contact</div>
-                                    </div>
-                                )}
+                                    )}
+                                </div>
                             </div>
                         </div>
                         <div className="flex gap-1.5">
                             <button
-                                onClick={() => findContacts(user)}
+                                onClick={() => findEmail(user)}
                                 className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-1 rounded text-xs font-medium transition-colors"
                             >
-                                Find Contact
+                                Find Email
                             </button>
                             <button
                                 onClick={() => hideUser(user)}
