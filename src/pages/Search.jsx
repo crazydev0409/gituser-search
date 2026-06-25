@@ -14,6 +14,22 @@ const isNoreply = (email) => {
 
 const hasEmail = (user) => Boolean(user?.email?.trim());
 
+const normalizeLocation = (value) => value.trim().replace(/\s+/g, ' ');
+
+const formatLocationQualifier = (rawLocation) => {
+    const locationValue = normalizeLocation(rawLocation).toLowerCase();
+    if (!locationValue) return null;
+    return locationValue.includes(' ')
+        ? `location:"${locationValue}"`
+        : `location:${locationValue}`;
+};
+
+const matchesSearchLocation = (userLocation, rawLocation) => {
+    const term = normalizeLocation(rawLocation).toLowerCase();
+    if (!term) return true;
+    return (userLocation || '').toLowerCase().includes(term);
+};
+
 const EMAIL_SEARCH_TERMS = [
     'gmail.com',
     'outlook.com',
@@ -302,7 +318,7 @@ export default function Search() {
         }));
 
     const getSearchParams = (status = 'running') => ({
-        location: location.trim(),
+        location: normalizeLocation(location),
         startDate,
         endDate,
         language: language.trim(),
@@ -315,7 +331,7 @@ export default function Search() {
     const handleSearch = async (e) => {
         e.preventDefault();
 
-        if (!location.trim()) {
+        if (!normalizeLocation(location)) {
             toast.error('Location is required');
             return;
         }
@@ -381,7 +397,7 @@ export default function Search() {
                 if (stopRequested.current) return [];
 
                 const qStr = [
-                    `location:${location}`,
+                    formatLocationQualifier(location),
                     `type:User`,
                     `created:${range.start}..${range.end}`,
                     DEVELOPMENT_EXPERIENCE_QUALIFIER,
@@ -406,7 +422,9 @@ export default function Search() {
 
                 if (newItems.length > 0) {
                     const hydratedUsers = await hydrateUsersWithProfiles(newItems);
-                    const localUsers = makeLocalFetchedUsers(hydratedUsers).filter(hasEmail);
+                    const localUsers = makeLocalFetchedUsers(hydratedUsers)
+                        .filter(hasEmail)
+                        .filter((user) => matchesSearchLocation(user.location, location));
                     if (!localUsers.length) return;
 
                     totalUsersFound += localUsers.length;
