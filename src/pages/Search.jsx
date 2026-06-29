@@ -12,8 +12,6 @@ const isNoreply = (email) => {
     return e.includes('noreply') || e.includes('@users.noreply.github.com');
 };
 
-const hasEmail = (user) => Boolean(user?.email?.trim());
-
 const normalizeLocation = (value) => value.trim().replace(/\s+/g, ' ');
 
 const formatLocationQualifier = (rawLocation) => {
@@ -29,12 +27,6 @@ const matchesSearchLocation = (userLocation, rawLocation) => {
     if (!term) return true;
     return (userLocation || '').toLowerCase().includes(term);
 };
-
-const EMAIL_SEARCH_TERMS = [
-    'gmail.com',
-    'outlook.com',
-    'in:bio @',
-];
 
 const DEVELOPMENT_EXPERIENCE_QUALIFIER = 'repos:>0';
 
@@ -95,7 +87,7 @@ export default function Search() {
 
     useEffect(() => {
         const storedSearch = loadStoredSearch();
-        setUsers(storedSearch.users.filter(hasEmail));
+        setUsers(storedSearch.users);
 
         if (storedSearch.params) {
             setLocation(storedSearch.params.location || 'Australia');
@@ -360,12 +352,7 @@ export default function Search() {
             });
             current = next;
         }
-        const searchQueries = monthRanges.flatMap((range) =>
-            EMAIL_SEARCH_TERMS.map((emailTerm) => ({
-                ...range,
-                emailTerm,
-            }))
-        );
+        const searchQueries = monthRanges;
 
         setSearchProgress({
             totalMonths: searchQueries.length,
@@ -404,7 +391,6 @@ export default function Search() {
                     minFollowers > 0 ? `followers:>=${minFollowers}` : null,
                     language ? `language:${language}` : null,
                     bioKeyword ? `in:bio ${bioKeyword}` : null,
-                    range.emailTerm,
                 ]
                     .filter(Boolean)
                     .join(' ');
@@ -423,7 +409,6 @@ export default function Search() {
                 if (newItems.length > 0) {
                     const hydratedUsers = await hydrateUsersWithProfiles(newItems);
                     const localUsers = makeLocalFetchedUsers(hydratedUsers)
-                        .filter(hasEmail)
                         .filter((user) => matchesSearchLocation(user.location, location));
                     if (!localUsers.length) return;
 
@@ -580,7 +565,7 @@ export default function Search() {
                 <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg mt-4">
                     <div className="flex justify-between text-sm text-blue-800 mb-2">
                         <span>Processing: {searchProgress.completedMonths}/{searchProgress.totalMonths} searches</span>
-                        <span>Matched: {searchProgress.totalUsersFound} users with email</span>
+                        <span>Matched: {searchProgress.totalUsersFound} users</span>
                     </div>
                     <div className="w-full bg-blue-200 rounded-full h-2">
                         <div
