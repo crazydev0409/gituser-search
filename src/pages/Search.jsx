@@ -74,6 +74,7 @@ export default function Search() {
     const [bioKeyword, setBioKeyword] = useState('');
     const [minFollowers, setMinFollowers] = useState(0);
     const [loading, setLoading] = useState(false);
+    const [copiedUserId, setCopiedUserId] = useState(null);
     const [searchProgress, setSearchProgress] = useState({
         totalMonths: 0,
         completedMonths: 0,
@@ -282,12 +283,14 @@ export default function Search() {
 
     const hideUser = async (user) => {
         updateStoredUsers((prev) => prev.filter((u) => u.id !== user.id));
+        if (copiedUserId === user.id) setCopiedUserId(null);
         toast.success('User removed');
     };
 
-    const copyEmail = async (email) => {
+    const copyEmail = async (user) => {
         try {
-            await navigator.clipboard.writeText(email);
+            await navigator.clipboard.writeText(user.email);
+            setCopiedUserId(user.id);
             toast.success('Email copied!');
         } catch {
             toast.error('Failed to copy email');
@@ -339,6 +342,7 @@ export default function Search() {
         setLoading(true);
         stopRequested.current = false;
         rateLimitToastShown.current = false;
+        setCopiedUserId(null);
         updateStoredUsers([]);
 
         const monthRanges = [];
@@ -583,7 +587,14 @@ export default function Search() {
 
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
                 {users.map((user) => (
-                    <div className="bg-white p-3 rounded-lg shadow-sm hover:shadow-md transition-shadow" key={user.id}>
+                    <div
+                        className={`p-3 rounded-lg shadow-sm hover:shadow-md transition-colors ${
+                            copiedUserId === user.id
+                                ? 'bg-green-100 ring-2 ring-green-500'
+                                : 'bg-white'
+                        }`}
+                        key={user.id}
+                    >
                         <div className="flex items-center gap-2 mb-2">
                             <a href={user.html_url} target="_blank" rel="noopener noreferrer">
                                 <img src={user.avatar_url} className="w-10 h-10 rounded-full" alt={user.login} />
@@ -597,7 +608,7 @@ export default function Search() {
                                     {user.email && (
                                         <button
                                             type="button"
-                                            onClick={() => copyEmail(user.email)}
+                                            onClick={() => copyEmail(user)}
                                             className="text-gray-400 hover:text-indigo-600 transition-colors flex-shrink-0"
                                             title="Copy email"
                                         >

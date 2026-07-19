@@ -10,6 +10,7 @@ export default function Home() {
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedIds, setSelectedIds] = useState(new Set());
     const [selectAll, setSelectAll] = useState(false);
+    const [copiedUserId, setCopiedUserId] = useState(null);
 
     useEffect(() => {
         const storedSearch = loadStoredSearch();
@@ -22,6 +23,7 @@ export default function Home() {
             setSearchParams(nextStoredSearch.params);
             setSelectedIds(new Set());
             setSelectAll(false);
+            setCopiedUserId(null);
         };
 
         window.addEventListener('storage', handleStorage);
@@ -41,12 +43,18 @@ export default function Home() {
             next.delete(id);
             return next;
         });
+        if (copiedUserId === id) setCopiedUserId(null);
         toast.success('User removed');
     };
 
-    const copyEmail = (email) => {
-        navigator.clipboard.writeText(email);
-        toast.success('Email copied!');
+    const copyEmail = async (user) => {
+        try {
+            await navigator.clipboard.writeText(user.email);
+            setCopiedUserId(user.id);
+            toast.success('Email copied!');
+        } catch {
+            toast.error('Failed to copy email');
+        }
     };
 
     const toggleSelect = (id) => {
@@ -78,6 +86,7 @@ export default function Home() {
             }
             return next;
         });
+        if (selectedIds.has(copiedUserId)) setCopiedUserId(null);
         setSelectedIds(new Set());
         setSelectAll(false);
         toast.success(`Removed ${ids.length} users`);
@@ -92,6 +101,7 @@ export default function Home() {
         setUsers([]);
         setSelectedIds(new Set());
         setSelectAll(false);
+        setCopiedUserId(null);
         toast.success('Stored users cleared');
     };
 
@@ -196,7 +206,11 @@ export default function Home() {
                                     initial={{ opacity: 0, y: 6 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     exit={{ opacity: 0, scale: 0.98 }}
-                                    className="relative bg-white p-4 rounded-xl shadow-sm hover:shadow-md transition-shadow"
+                                    className={`relative p-4 rounded-xl shadow-sm hover:shadow-md transition-colors ${
+                                        copiedUserId === user.id
+                                            ? 'bg-green-100 ring-2 ring-green-500'
+                                            : 'bg-white'
+                                    }`}
                                 >
                                     <input
                                         type="checkbox"
@@ -227,15 +241,17 @@ export default function Home() {
                                     <div className="space-y-1 mb-3">
                                         <div className="flex items-center gap-1">
                                             <p className="text-xs text-gray-700 truncate flex-1">
-                                                {user.email}
+                                                {user.email || 'No email'}
                                             </p>
-                                            <button
-                                                onClick={() => copyEmail(user.email)}
-                                                className="text-gray-400 hover:text-indigo-600 transition-colors flex-shrink-0"
-                                                title="Copy email"
-                                            >
-                                                <Copy size={13} />
-                                            </button>
+                                            {user.email && (
+                                                <button
+                                                    onClick={() => copyEmail(user)}
+                                                    className="text-gray-400 hover:text-indigo-600 transition-colors flex-shrink-0"
+                                                    title="Copy email"
+                                                >
+                                                    <Copy size={13} />
+                                                </button>
+                                            )}
                                         </div>
                                         <p className="text-xs text-gray-500">{user.location || 'Unknown location'}</p>
                                     </div>
