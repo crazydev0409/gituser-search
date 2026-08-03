@@ -606,7 +606,7 @@ export default function Search() {
                                 <img src={user.avatar_url} className="w-10 h-10 rounded-full" alt={user.login} />
                             </a>
                             <div className="min-w-0">
-                                <div className="text-sm font-semibold truncate">{user.name || user.login}</div>
+                                <div className="text-sm font-semibold break-words whitespace-normal">{user.name || user.login}</div>
                                 <div className="text-xs text-gray-500 truncate">@{user.login}</div>
                                 <div className="text-xs text-gray-500 truncate">{user.location || 'Unknown'}</div>
                                 <div className="flex items-center gap-1">
