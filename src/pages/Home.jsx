@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Copy, EyeOff } from 'lucide-react';
 import { ToastContainer, toast } from 'react-toastify';
-import { clearStoredUsers, loadStoredSearch, loadStoredUsers, saveStoredUsers } from '../utils/browserStorage';
+import { clearCopiedUserId, clearStoredUsers, loadCopiedUserId, loadStoredSearch, loadStoredUsers, saveCopiedUserId, saveStoredUsers } from '../utils/browserStorage';
 
 export default function Home() {
     const [users, setUsers] = useState([]);
@@ -16,6 +16,7 @@ export default function Home() {
         const storedSearch = loadStoredSearch();
         setUsers(loadStoredUsers());
         setSearchParams(storedSearch.params);
+        setCopiedUserId(loadCopiedUserId());
 
         const handleStorage = () => {
             const nextStoredSearch = loadStoredSearch();
@@ -23,7 +24,7 @@ export default function Home() {
             setSearchParams(nextStoredSearch.params);
             setSelectedIds(new Set());
             setSelectAll(false);
-            setCopiedUserId(null);
+            setCopiedUserId(loadCopiedUserId());
         };
 
         window.addEventListener('storage', handleStorage);
@@ -43,7 +44,10 @@ export default function Home() {
             next.delete(id);
             return next;
         });
-        if (copiedUserId === id) setCopiedUserId(null);
+        if (copiedUserId === id) {
+            setCopiedUserId(null);
+            clearCopiedUserId();
+        }
         toast.success('User removed');
     };
 
@@ -51,6 +55,9 @@ export default function Home() {
         try {
             await navigator.clipboard.writeText(user.email);
             setCopiedUserId(user.id);
+            if (!saveCopiedUserId(user.id)) {
+                toast.error('Failed saving copied highlight to browser storage.');
+            }
             toast.success('Email copied!');
         } catch {
             toast.error('Failed to copy email');
@@ -86,7 +93,10 @@ export default function Home() {
             }
             return next;
         });
-        if (selectedIds.has(copiedUserId)) setCopiedUserId(null);
+        if (selectedIds.has(copiedUserId)) {
+            setCopiedUserId(null);
+            clearCopiedUserId();
+        }
         setSelectedIds(new Set());
         setSelectAll(false);
         toast.success(`Removed ${ids.length} users`);

@@ -1,5 +1,6 @@
 const USERS_STORAGE_KEY = 'gitscan.users.v1';
 const SEARCH_STORAGE_KEY = 'gitscan.search.v1';
+const COPIED_USER_STORAGE_KEY = 'gitscan.copiedUserId.v1';
 
 const emptyStoredSearch = {
     params: null,
@@ -95,9 +96,45 @@ export function mergeStoredUsers(users) {
 export function clearStoredUsers() {
     try {
         window.localStorage.removeItem(USERS_STORAGE_KEY);
+        clearCopiedUserId();
         return true;
     } catch (err) {
         console.error('Failed clearing stored users:', err);
+        return false;
+    }
+}
+
+export function loadCopiedUserId() {
+    try {
+        const raw = window.localStorage.getItem(COPIED_USER_STORAGE_KEY);
+        if (!raw) return null;
+        const stored = JSON.parse(raw);
+        return stored === null || stored === undefined || stored === '' ? null : stored;
+    } catch (err) {
+        console.error('Failed loading copied user id:', err);
+        return null;
+    }
+}
+
+export function saveCopiedUserId(userId) {
+    try {
+        if (userId === null || userId === undefined || userId === '') {
+            return clearCopiedUserId();
+        }
+        window.localStorage.setItem(COPIED_USER_STORAGE_KEY, JSON.stringify(userId));
+        return true;
+    } catch (err) {
+        console.error('Failed saving copied user id:', err);
+        return false;
+    }
+}
+
+export function clearCopiedUserId() {
+    try {
+        window.localStorage.removeItem(COPIED_USER_STORAGE_KEY);
+        return true;
+    } catch (err) {
+        console.error('Failed clearing copied user id:', err);
         return false;
     }
 }

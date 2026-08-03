@@ -4,7 +4,7 @@ import { toast, ToastContainer } from 'react-toastify';
 import dayjs from 'dayjs';
 import { Copy } from 'lucide-react';
 import { ThrottledQueue } from '../utils/requestQueue';
-import { loadStoredSearch, mergeStoredUsers, saveStoredSearch } from '../utils/browserStorage';
+import { loadCopiedUserId, loadStoredSearch, mergeStoredUsers, saveCopiedUserId, saveStoredSearch, clearCopiedUserId } from '../utils/browserStorage';
 
 const isNoreply = (email) => {
     if (!email) return true;
@@ -89,6 +89,7 @@ export default function Search() {
     useEffect(() => {
         const storedSearch = loadStoredSearch();
         setUsers(storedSearch.users);
+        setCopiedUserId(loadCopiedUserId());
 
         if (storedSearch.params) {
             setLocation(storedSearch.params.location || 'Australia');
@@ -283,7 +284,10 @@ export default function Search() {
 
     const hideUser = async (user) => {
         updateStoredUsers((prev) => prev.filter((u) => u.id !== user.id));
-        if (copiedUserId === user.id) setCopiedUserId(null);
+        if (copiedUserId === user.id) {
+            setCopiedUserId(null);
+            clearCopiedUserId();
+        }
         toast.success('User removed');
     };
 
@@ -291,6 +295,9 @@ export default function Search() {
         try {
             await navigator.clipboard.writeText(user.email);
             setCopiedUserId(user.id);
+            if (!saveCopiedUserId(user.id)) {
+                toast.error('Failed saving copied highlight to browser storage.');
+            }
             toast.success('Email copied!');
         } catch {
             toast.error('Failed to copy email');
@@ -342,7 +349,6 @@ export default function Search() {
         setLoading(true);
         stopRequested.current = false;
         rateLimitToastShown.current = false;
-        setCopiedUserId(null);
         updateStoredUsers([]);
 
         const monthRanges = [];
