@@ -1,3 +1,27 @@
+# GitScan contact discovery
+
+Search automatically collects publicly listed contacts from GitHub profile fields,
+the user's linked social accounts, and the profile repository README
+(`username/username`). Existing commit-email lookup remains as a fallback.
+Use **Find Contacts** to refresh a result, including results saved before this feature.
+
+Supported contacts include email, labeled phone numbers, Discord and Telegram
+handles and links, WhatsApp, Signal, LinkedIn, X/Twitter, Facebook, Instagram,
+YouTube, Calendly, Matrix, Bluesky, Reddit, Twitch, websites, other linked social
+accounts, and README links labeled as contact/booking/portfolio links.
+Each discovered contact includes its public source and a copy action. Contacts
+are saved in browser storage and can be filtered on the Users page.
+
+Discovery does not crawl external websites, infer unlisted handles, or retrieve
+private contact details. A Discord invitation may refer to a community, and
+README links may be shared contacts; source links allow checking context.
+Missing profile READMEs are normal. Other failed optional sources are marked
+as incomplete and can be retried. Discovery adds two API requests per user.
+The server requires `GITHUB_TOKEN`, as before.
+
+API references: [GitHub social accounts](https://docs.github.com/en/rest/users/social-accounts)
+and [repository contents](https://docs.github.com/en/rest/repos/contents).
+
 # Getting Started with Create React App
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).

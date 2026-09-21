@@ -1,3 +1,4 @@
+import ContactList from '../components/ContactList';
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Copy, EyeOff } from 'lucide-react';
@@ -120,6 +121,7 @@ export default function Home() {
         const q = searchQuery.toLowerCase();
         return (
             user.email?.toLowerCase().includes(q) ||
+            user.contacts?.some((contact) => (contact.type + ' ' + contact.value).toLowerCase().includes(q)) ||
             user.name?.toLowerCase().includes(q) ||
             user.login?.toLowerCase().includes(q)
         );
@@ -160,7 +162,7 @@ export default function Home() {
                         <input
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            placeholder="Search by name or email..."
+                            placeholder="Search by name, email, or contact..."
                             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500"
                         />
                     </div>
@@ -266,6 +268,7 @@ export default function Home() {
                                         <p className="text-xs text-gray-500">{user.location || 'Unknown location'}</p>
                                     </div>
 
+                                    <ContactList user={user} />
                                     <div className="flex gap-2">
                                         <button
                                             onClick={() => hideUser(user.id)}

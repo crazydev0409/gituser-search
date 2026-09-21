@@ -81,16 +81,12 @@ export function saveStoredUsers(users) {
 
 export function mergeStoredUsers(users) {
     const existingUsers = loadStoredUsers();
-    const knownUserIds = new Set(existingUsers.map((user) => user.id || user.login).filter(Boolean));
-    const usersToAdd = (Array.isArray(users) ? users : []).filter((user) => {
-        const userId = user?.id || user?.login;
-        if (!userId || knownUserIds.has(userId)) return false;
-        knownUserIds.add(userId);
-        return true;
-    });
-
-    if (!usersToAdd.length) return true;
-    return saveStoredUsers([...existingUsers, ...usersToAdd]);
+    const merged = new Map(existingUsers.map((user) => [user.login || user.id, user]));
+    for (const user of Array.isArray(users) ? users : []) {
+        const key = user?.login || user?.id;
+        if (key) merged.set(key, { ...merged.get(key), ...user });
+    }
+    return saveStoredUsers([...merged.values()]);
 }
 
 export function clearStoredUsers() {

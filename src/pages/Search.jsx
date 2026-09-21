@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Axios from '../utils/Axios';
+import ContactList from '../components/ContactList';
+import { discoverContacts } from '../utils/contacts';
 import { toast, ToastContainer } from 'react-toastify';
 import dayjs from 'dayjs';
 import { Copy } from 'lucide-react';
@@ -74,6 +76,7 @@ export default function Search() {
     const [bioKeyword, setBioKeyword] = useState('');
     const [minFollowers, setMinFollowers] = useState(0);
     const [loading, setLoading] = useState(false);
+    const [contactLookups, setContactLookups] = useState(new Set());
     const [copiedUserId, setCopiedUserId] = useState(null);
     const [searchProgress, setSearchProgress] = useState({
         totalMonths: 0,
@@ -235,9 +238,11 @@ export default function Search() {
         const profileResults = await Promise.allSettled(
             searchUsers.map((user) => detailQueue.enqueue(async () => {
                 const { data } = await safeAxiosGet(`/users/${user.login}`, {}, 1);
-                const email = await collectEmailFromUser(user.login, data?.email);
+                const contactData = await discoverContacts(data, safeAxiosGet);
+                const email = contactData.contacts.find((c) => c.type === 'Email')?.value || await collectEmailFromUser(user.login, data?.email);
                 return {
                     ...user,
+                    ...contactData,
                     name: data?.name || user.login,
                     email: email || '',
                     location: data?.location || user.location || '',
@@ -261,24 +266,24 @@ export default function Search() {
         });
     }
 
-    const findEmail = async (user) => {
+    const findContacts = async (user) => {
+        if (loading || contactLookups.has(user.id)) return;
+        stopRequested.current = false;
+        setContactLookups((prev) => new Set(prev).add(user.id));
         try {
-            const profileRes = await safeAxiosGet(`/users/${user.login}`, {}, 1);
-            const email = profileRes.data?.email || (await collectEmailFromUser(user.login));
-
-            if (email) {
-                updateStoredUsers((prev) => prev.map((item) => item.id === user.id ? {
-                    ...item,
-                    name: profileRes.data?.name || user.login,
-                    email,
-                    location: profileRes.data?.location || '',
-                } : item));
-                toast.success('Email found!');
-            } else {
-                toast.warning('No email found for this user');
-            }
+            const { data } = await safeAxiosGet('/users/' + user.login, {}, 1);
+            const contactData = await discoverContacts(data, safeAxiosGet);
+            const email = contactData.contacts.find((c) => c.type === 'Email')?.value || await collectEmailFromUser(user.login, data?.email);
+            const updated = { ...user, ...contactData, name: data.name || user.login, email: email || user.email || '', location: data.location || '' };
+            updateStoredUsers((prev) => prev.map((item) => item.id === user.id ? updated : item));
+            if (!mergeStoredUsers([updated])) toast.error('Failed saving contacts to Users.');
+            if (contactData.contactLookupIncomplete) toast.warning('Some contact sources could not be checked. You can retry.');
+            else if (email || contactData.contacts.length) toast.success('Contacts updated!');
+            else toast.info('No publicly listed contacts found');
         } catch {
-            toast.error('Email lookup failed');
+            toast.error('Contact lookup failed');
+        } finally {
+            setContactLookups((prev) => { const next = new Set(prev); next.delete(user.id); return next; });
         }
     };
 
@@ -310,6 +315,8 @@ export default function Search() {
             login: user.login ?? '',
             name: user.name || user.login || '',
             email: user.email || '',
+            contacts: user.contacts || [],
+            contactLookupIncomplete: user.contactLookupIncomplete || false,
             avatar_url: user.avatar_url,
             html_url: user.html_url,
             location: user.location ?? '',
@@ -554,7 +561,7 @@ export default function Search() {
                 <div className="flex gap-3">
                     <button
                         type="submit"
-                        disabled={loading}
+                        disabled={loading || contactLookups.size > 0}
                         className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white py-2.5 rounded-md font-medium transition-colors"
                     >
                         {loading ? 'Searching...' : 'Search'}
@@ -570,6 +577,8 @@ export default function Search() {
                     )}
                 </div>
             </form>
+
+            <p className="mt-3 text-sm text-gray-500">Find publicly listed contacts in GitHub profiles, social links, and profile READMEs, plus available commit emails.</p>
 
             {loading && searchProgress.totalMonths > 0 && (
                 <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg mt-4">
@@ -591,7 +600,7 @@ export default function Search() {
                 <span className="text-sm text-gray-500">{users.length} users</span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                 {users.map((user) => (
                     <div
                         className={`p-3 rounded-lg shadow-sm hover:shadow-md transition-colors ${
@@ -624,12 +633,14 @@ export default function Search() {
                                 </div>
                             </div>
                         </div>
+                        <ContactList user={user} />
                         <div className="flex gap-1.5">
                             <button
-                                onClick={() => findEmail(user)}
+                                onClick={() => findContacts(user)}
+                                disabled={loading || contactLookups.has(user.id)}
                                 className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-1 rounded text-xs font-medium transition-colors"
                             >
-                                Find Email
+                                {contactLookups.has(user.id) ? 'Finding...' : 'Find Contacts'}
                             </button>
                             <button
                                 onClick={() => hideUser(user)}
